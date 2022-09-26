@@ -21,7 +21,6 @@ export TF_VAR_region := $(REGION)
 export TF_VAR_environment := $(ENVIRONMENT)
 export TF_VAR_namespace := $(NAMESPACE)
 
-
 .DEFAULT_GOAL := default
 .PHONY: default
 default: tools
@@ -53,10 +52,10 @@ toolchain-update:
 .PHONY: infra
 infra: \
 	tools/terraform \
-	secrets/$(ENVIRONMENT).env \
 	config/$(ENVIRONMENT).tfbackend \
+	cache/plaintext/$(ENVIRONMENT).env \
 	cache/archives/digital-ocean-amd64.raw.gz
-	source plaintext/$(ENVIRONMENT).env \
+	source cache/plaintext/$(ENVIRONMENT).env \
 	&& cd infra/main \
 	&& terraform init \
 		-backend-config="../../config/$(ENVIRONMENT).tfbackend" \
@@ -90,39 +89,6 @@ images/toolchain.tar:
 		-f images/toolchain/Dockerfile \
 		.
 	docker save "local/$(NAME)-build" -o "$@"
-
-define toolchain
-	docker load -i images/toolchain.tar
-	docker run \
-		--rm \
-		--tty \
-		--interactive \
-		--user=$(1) \
-		--platform=linux/$(ARCH) \
-		--volume $(PWD)/config:/config \
-		--volume $(PWD)/cache:/cache \
-		--volume $(PWD)/cache:/home/build/.cache \
-		--volume $(PWD)/tools:/tools \
-		--volume $(PWD)/images:/images \
-		--env ARCH=$(ARCH) \
-		local/$(NAME)-build \
-		bash -c $(2)
-endef
-
-define git_clone
-	[ -d cache/$(1) ] || git clone $(2) cache/$(1)
-	git -C cache/$(1) checkout $(3)
-	git -C cache/$(1) rev-parse --verify HEAD | grep -q $(3) || { \
-		echo 'Error: Git ref/branch collision.'; exit 1; \
-	};
-endef
-
-define download
-	curl -s -S -L -f $(1) -z $(2) -o $(2)
-	openssl dgst -sha256 -r $(2) | grep -q $(3) || { \
-		echo 'Error: File $(2) did not match expected hash'; exit 1; \
-	};
-endef
 
 tools/doctl: images/toolchain.tar
 	$(call git_clone,doctl,$(DOCTL_URL),$(DOCTL_REF))
@@ -163,3 +129,49 @@ tools/terraform: images/toolchain.tar
 		-ldflags="-extldflags=-static" \
 		-o /tools/; \
 	")
+
+tools/sops: images/toolchain.tar
+	$(call git_clone,sops,$(SOPS_URL),$(SOPS_REF))
+	$(call toolchain,$(USER)," \
+		cd /cache/sops; \
+		CGO_ENABLED=0 \
+		GOCACHE=/cache \
+		GOPATH=/cache/go \
+		go build \
+		-ldflags="-extldflags=-static" \
+		-o /tools/ \
+		go.mozilla.org/sops/v3/cmd/sops \
+	")
+
+define toolchain
+	docker load -i images/toolchain.tar
+	docker run \
+		--rm \
+		--tty \
+		--interactive \
+		--user=$(1) \
+		--platform=linux/$(ARCH) \
+		--volume $(PWD)/config:/config \
+		--volume $(PWD)/cache:/cache \
+		--volume $(PWD)/cache:/home/build/.cache \
+		--volume $(PWD)/tools:/tools \
+		--volume $(PWD)/images:/images \
+		--env ARCH=$(ARCH) \
+		local/$(NAME)-build \
+		bash -c $(2)
+endef
+
+define git_clone
+	[ -d cache/$(1) ] || git clone $(2) cache/$(1)
+	git -C cache/$(1) checkout $(3)
+	git -C cache/$(1) rev-parse --verify HEAD | grep -q $(3) || { \
+		echo 'Error: Git ref/branch collision.'; exit 1; \
+	};
+endef
+
+define download
+	curl -s -S -L -f $(1) -z $(2) -o $(2)
+	openssl dgst -sha256 -r $(2) | grep -q $(3) || { \
+		echo 'Error: File $(2) did not match expected hash'; exit 1; \
+	};
+endef

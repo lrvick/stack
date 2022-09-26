@@ -1,36 +1,48 @@
 #!/bin/bash
+set -e
 
-eval "$(jq -r '@sh "IP=\(.ip) NAME=\(.name)" ENVIRONMENT=\(.environment)')"
+eval "$(jq -r '@sh "IP=\(.ip) NAME=\(.name) ENVIRONMENT=\(.environment)"')"
 
-plaintext_dir = "../../cache/plaintext/${ENVIRONMENT}"
-encrypted_dir = "../../config/${ENVIRONMENT}"
-tools_dir = "../../tools/"
+plaintext_dir="../../cache/plaintext/${ENVIRONMENT}"
+encrypted_dir="../../config/${ENVIRONMENT}"
+tools_dir="../../tools/"
+keys="${ADMIN_KEYS}"
 export PATH=${tools_dir}:${PATH}
 
-mkdir -p ${plaintext_dir}
+mkdir -p ${plaintext_dir} ${encrypted_dir}
 
-if [ -e "${plaintext_dir}/controlplane.yaml" ]; then
+if [ ! -e "${encrypted_dir}/controlplane.yaml" ]; then
 	talosctl gen config \
 		-o ${plaintext_dir} \
 		"${NAME}" \
 		"https://${IP}:443"
 fi
 
-if [ -e "${encrypted_dir}/controlplane.yaml" ]; then
-	echo "run sops encrypt here"
-fi
+for file in controlplane.yaml worker.yaml talosconfig; do
+	if [ ! -e "${encrypted_dir}/${file}" ]; then
+		sops \
+			--add-pgp "${keys}" \
+			--input-type "yaml" \
+			--output-type "yaml" \
+			--encrypted-regex "token|key|secret|aescbcEncryptionSecret" \
+			--encrypt \
+			--output ${encrypted_dir}/${file} \
+			${plaintext_dir}/${file}
+	fi
+	if [ ! -e "${plaintext_dir}/${file}" ]; then
+		sops \
+			--decrypt \
+			--input-type "yaml" \
+			--output-type "yaml" \
+			--output ${plaintext_dir}/${file} \
+			${encrypted_dir}/${file}
+	fi
+done
 
-if [ -e "${plaintext_dir}/controlplane.yaml" ]; then
-	echo "run sops decrypt here"
-fi
-
-jq \
-    -n \
-    --arg controlplane-yaml "${plaintext_dir}/controlplane.yaml" \
-    --arg worker-yaml "${plaintext_dir}/worker.yaml" \
-    --arg talosconfig "${plaintext_dir}/talosconfig" \
-    '{ \
-        "controlplane.yaml":$controlplane-yaml, \
-        "worker.yaml":$worker-yaml, \
-        "talosconfig":$talosconfig, \
-    }'
+cat <<EOT
+{
+    "controlplane.yaml":"${plaintext_dir}/controlplane.yaml",
+    "worker.yaml":"${plaintext_dir}/worker.yaml",
+    "talosconfig":"${plaintext_dir}/talosconfig"
+}
+EOT
