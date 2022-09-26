@@ -1,0 +1,36 @@
+#!/bin/bash
+
+eval "$(jq -r '@sh "IP=\(.ip) NAME=\(.name)" ENVIRONMENT=\(.environment)')"
+
+plaintext_dir = "../../cache/plaintext/${ENVIRONMENT}"
+encrypted_dir = "../../config/${ENVIRONMENT}"
+tools_dir = "../../tools/"
+export PATH=${tools_dir}:${PATH}
+
+mkdir -p ${plaintext_dir}
+
+if [ -e "${plaintext_dir}/controlplane.yaml" ]; then
+	talosctl gen config \
+		-o ${plaintext_dir} \
+		"${NAME}" \
+		"https://${IP}:443"
+fi
+
+if [ -e "${encrypted_dir}/controlplane.yaml" ]; then
+	echo "run sops encrypt here"
+fi
+
+if [ -e "${plaintext_dir}/controlplane.yaml" ]; then
+	echo "run sops decrypt here"
+fi
+
+jq \
+    -n \
+    --arg controlplane-yaml "${plaintext_dir}/controlplane.yaml" \
+    --arg worker-yaml "${plaintext_dir}/worker.yaml" \
+    --arg talosconfig "${plaintext_dir}/talosconfig" \
+    '{ \
+        "controlplane.yaml":$controlplane-yaml, \
+        "worker.yaml":$worker-yaml, \
+        "talosconfig":$talosconfig, \
+    }'

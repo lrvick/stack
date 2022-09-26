@@ -1,0 +1,8 @@
+git
+curl
+build-essential
+python3
+pkg-config
+golang
+rsync
+vim-nox

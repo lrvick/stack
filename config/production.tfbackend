@@ -1,0 +1,4 @@
+bucket = "personal-production-9cbda6868247b6e7"
+endpoint = "https://sfo3.digitaloceanspaces.com"
+key = "terraform.tfstate"
+region = "sfo3"
